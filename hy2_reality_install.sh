@@ -95,6 +95,226 @@ check_root() {
 }
 
 #####################################################################
+# 证书管理
+#####################################################################
+
+show_cert_menu() {
+    clear
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}          证书管理${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo ""
+
+    # 检查证书是否存在
+    if [ ! -f /etc/sing-box/certs/cert.crt ]; then
+        print_error "未找到证书文件"
+        echo ""
+        echo -e "${YELLOW}按任意键返回主菜单...${NC}"
+        read -n 1
+        show_main_menu
+        return
+    fi
+
+    # 显示证书信息
+    local cert_file="/etc/sing-box/certs/cert.crt"
+    local cert_subject cert_issuer cert_expire cert_expire_epoch now_epoch days_left
+
+    cert_subject=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null | sed 's/subject=//;s/^ *//')
+    cert_issuer=$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null | sed 's/issuer=//;s/^ *//')
+    cert_expire=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)
+    cert_expire_epoch=$(date -d "$cert_expire" +%s 2>/dev/null)
+    now_epoch=$(date +%s)
+
+    if [ -n "$cert_expire_epoch" ]; then
+        days_left=$(( (cert_expire_epoch - now_epoch) / 86400 ))
+    else
+        days_left="未知"
+    fi
+
+    echo -e "  证书域名:  ${GREEN}${cert_subject}${NC}"
+    echo -e "  颁发机构:  ${GREEN}${cert_issuer}${NC}"
+    echo -e "  到期时间:  ${GREEN}${cert_expire}${NC}"
+
+    if [ "$days_left" != "未知" ]; then
+        if [ "$days_left" -le 0 ]; then
+            echo -e "  剩余天数:  ${RED}已过期${NC}"
+        elif [ "$days_left" -le 7 ]; then
+            echo -e "  剩余天数:  ${RED}${days_left} 天${NC}"
+        elif [ "$days_left" -le 30 ]; then
+            echo -e "  剩余天数:  ${YELLOW}${days_left} 天${NC}"
+        else
+            echo -e "  剩余天数:  ${GREEN}${days_left} 天${NC}"
+        fi
+    fi
+
+    # 检查是否为自签名证书
+    local is_self_signed=false
+    if echo "$cert_issuer" | grep -q "bing.com" || [ "$cert_subject" = "$cert_issuer" ]; then
+        is_self_signed=true
+    fi
+
+    # 检查 acme.sh 自动续期状态
+    echo ""
+    if [ -d "$HOME/.acme.sh" ]; then
+        if crontab -l 2>/dev/null | grep -q '.acme.sh'; then
+            echo -e "  自动续期:  ${GREEN}已启用 (acme.sh cron)${NC}"
+        else
+            echo -e "  自动续期:  ${RED}未启用 (cron 任务缺失)${NC}"
+        fi
+    else
+        if [ "$is_self_signed" = true ]; then
+            echo -e "  证书类型:  ${YELLOW}自签名证书 (无需续期)${NC}"
+        else
+            echo -e "  自动续期:  ${RED}未安装 acme.sh${NC}"
+        fi
+    fi
+
+    echo ""
+    echo -e "${CYAN}───────────────────────────────────────${NC}"
+    echo ""
+    echo "  1) 一键续期证书"
+    echo "  2) 修复自动续期 (重建 cron 任务)"
+    echo "  3) 返回主菜单"
+    echo ""
+
+    read -p "请输入选项 [1-3]: " cert_choice
+
+    case $cert_choice in
+        1)
+            renew_certificate
+            ;;
+        2)
+            fix_auto_renewal
+            ;;
+        3)
+            show_main_menu
+            ;;
+        *)
+            print_error "无效选项"
+            sleep 2
+            show_cert_menu
+            ;;
+    esac
+}
+
+renew_certificate() {
+    echo ""
+
+    # 检查是否为自签名证书
+    local cert_issuer
+    cert_issuer=$(openssl x509 -in /etc/sing-box/certs/cert.crt -noout -issuer 2>/dev/null | sed 's/issuer=//;s/^ *//')
+    if echo "$cert_issuer" | grep -q "bing.com"; then
+        print_error "当前使用的是自签名证书，无法通过 acme.sh 续期"
+        print_info "如需使用 Let's Encrypt 证书，请重新安装并选择 Let's Encrypt 方式"
+        echo ""
+        echo -e "${YELLOW}按任意键返回...${NC}"
+        read -n 1
+        show_cert_menu
+        return
+    fi
+
+    # 检查 acme.sh 是否存在
+    if [ ! -f "$HOME/.acme.sh/acme.sh" ]; then
+        print_error "未找到 acme.sh，无法续期证书"
+        print_info "请重新安装并选择 Let's Encrypt 证书方式"
+        echo ""
+        echo -e "${YELLOW}按任意键返回...${NC}"
+        read -n 1
+        show_cert_menu
+        return
+    fi
+
+    # 获取证书域名
+    local cert_domain
+    cert_domain=$(openssl x509 -in /etc/sing-box/certs/cert.crt -noout -subject 2>/dev/null | grep -oP 'CN\s*=\s*\K[^ ,]+')
+
+    if [ -z "$cert_domain" ]; then
+        print_error "无法从证书中获取域名"
+        echo ""
+        echo -e "${YELLOW}按任意键返回...${NC}"
+        read -n 1
+        show_cert_menu
+        return
+    fi
+
+    print_info "正在续期证书: ${cert_domain} ..."
+
+    # 强制续期
+    local renew_output
+    renew_output=$(~/.acme.sh/acme.sh --renew -d "${cert_domain}" --ecc --force 2>&1)
+    local renew_status=$?
+
+    if [ $renew_status -eq 0 ]; then
+        # 重新安装证书到目标路径
+        ~/.acme.sh/acme.sh --install-cert \
+            -d "${cert_domain}" \
+            --ecc \
+            --key-file /etc/sing-box/certs/private.key \
+            --fullchain-file /etc/sing-box/certs/cert.crt \
+            --reloadcmd "systemctl reload sing-box 2>/dev/null || true" \
+            >/dev/null 2>&1
+
+        chmod 644 /etc/sing-box/certs/cert.crt
+        chmod 600 /etc/sing-box/certs/private.key
+
+        # 重载服务
+        systemctl reload sing-box 2>/dev/null || systemctl restart sing-box 2>/dev/null || true
+
+        local new_expire
+        new_expire=$(openssl x509 -in /etc/sing-box/certs/cert.crt -noout -enddate | cut -d= -f2)
+
+        echo ""
+        print_success "证书续期成功！"
+        print_info "新的到期时间: ${new_expire}"
+    else
+        echo ""
+        print_error "证书续期失败"
+        echo -e "${YELLOW}错误信息:${NC}"
+        echo "$renew_output" | tail -5
+        echo ""
+        print_info "可能的原因:"
+        echo "  - Cloudflare API Token 已失效"
+        echo "  - 域名 DNS 已变更"
+        echo "  - 网络连接问题"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}按任意键返回...${NC}"
+    read -n 1
+    show_cert_menu
+}
+
+fix_auto_renewal() {
+    echo ""
+
+    if [ ! -f "$HOME/.acme.sh/acme.sh" ]; then
+        print_error "未找到 acme.sh，无法设置自动续期"
+        echo ""
+        echo -e "${YELLOW}按任意键返回...${NC}"
+        read -n 1
+        show_cert_menu
+        return
+    fi
+
+    print_info "正在修复自动续期..."
+
+    # 安装 acme.sh 的 cron 任务
+    ~/.acme.sh/acme.sh --install-cronjob 2>/dev/null
+
+    if crontab -l 2>/dev/null | grep -q '.acme.sh'; then
+        print_success "自动续期 cron 任务已恢复"
+        print_info "acme.sh 将每天自动检查证书，到期前 30 天自动续期"
+    else
+        print_error "cron 任务安装失败，请手动检查 crontab"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}按任意键返回...${NC}"
+    read -n 1
+    show_cert_menu
+}
+
+#####################################################################
 # 主菜单
 #####################################################################
 
@@ -118,11 +338,12 @@ EOF
     echo "  1) 安装 Sing-box (Hy2 + Reality + WS)"
     echo "  2) 卸载 Sing-box"
     echo "  3) 查看配置信息"
-    echo "  4) VPS 系统调优 (BBR + TCP优化)"
-    echo "  5) 退出"
+    echo "  4) 证书管理 (查看/续期/自动续期)"
+    echo "  5) VPS 系统调优 (BBR + TCP优化)"
+    echo "  6) 退出"
     echo ""
 
-    read -p "请输入选项 [1-5]: " menu_choice
+    read -p "请输入选项 [1-6]: " menu_choice
 
     case $menu_choice in
         1)
@@ -135,9 +356,12 @@ EOF
             show_config_menu
             ;;
         4)
-            show_optimize_menu
+            show_cert_menu
             ;;
         5)
+            show_optimize_menu
+            ;;
+        6)
             echo -e "${GREEN}再见！${NC}"
             exit 0
             ;;
