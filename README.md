@@ -1,21 +1,22 @@
 # one-click-hy2-reality-ws
-hy2 &amp; reality &amp; vless-ws 一键安装脚本
+hy2 & reality & vless-ws & shadowsocks2022 一键安装脚本
 
-# 🚀 Hysteria 2 + VLESS Reality + VLESS WS TLS 一键安装脚本
+# Hysteria 2 + VLESS Reality + VLESS WS TLS + Shadowsocks 2022 一键安装脚本
 
-## 📖 简介
-本项目提供一个 **一键安装脚本**，用于在 Linux 服务器上快速部署 **Hysteria 2 (Hy2)**、**VLESS Reality** 和 **VLESS WS TLS**。
+## 简介
+本项目提供一个 **一键安装脚本**，用于在 Linux 服务器上快速部署 **Hysteria 2**、**VLESS Reality**、**VLESS WS TLS** 和 **Shadowsocks 2022**，四种协议可按需选择，单独或组合安装。
 
 你可以根据情况选择：
-- ✅ 使用 **域名 + Cloudflare API** 自动配置
-- ✅ 使用 **域名 + Let's Encrypt** 证书（Standalone 模式）
-- ✅ **无域名**，使用 IP + 自签证书
+- 使用 **域名 + Cloudflare API** 自动配置证书
+- 使用 **域名 + Let's Encrypt** 证书（Standalone 模式）
+- **无域名**，使用 IP + 自签证书（Reality / SS2022 无需证书）
 
 ---
 
-## ✨ 功能
+## 功能特性
 - 一键安装，无需手动繁琐配置
-- 支持三种协议：**Hysteria 2**、**VLESS Reality**、**VLESS WS TLS**
+- **支持四种协议**：Hysteria 2、VLESS Reality、VLESS WS TLS、Shadowsocks 2022
+- **协议自由选择**：安装时按需勾选，可单独安装任意一种或任意组合
 - 支持 **自签证书**，无需购买域名也可使用
 - 可选 **Cloudflare API 自动解析**，省去手动添加 DNS
 - 可选 **Let's Encrypt Standalone** 模式申请证书
@@ -26,59 +27,96 @@ hy2 &amp; reality &amp; vless-ws 一键安装脚本
 
 ---
 
-## 📋 协议说明
+## 协议说明
 
 | 协议 | 传输层 | 默认端口 | 特点 |
 |------|--------|----------|------|
 | Hysteria 2 | UDP/QUIC | 443 | 高速、抗丢包、适合不稳定网络 |
 | VLESS Reality | TCP | 8443 | 高度伪装、防探测、无需证书 |
 | VLESS WS TLS | TCP/WebSocket | 2053 | 兼容性好、支持CDN、适合受限网络 |
+| Shadowsocks 2022 | TCP/UDP | 8388 | 轻量、高性能、无需证书、适合中转落地 |
 
 ---
 
-## 📌 前置条件
-在运行脚本前，请准备以下内容：
+## 前置条件
 
 1. **服务器（必备）**
    - Linux 系统（推荐 Ubuntu 20.04 / 22.04 / Debian 11+）
-   - 已开放相应端口（UDP 443, TCP 8443, TCP 2053）
+   - 已开放相应端口（按所选协议）
 
 2. **域名（可选）**
-   - 如果使用域名，需要将域名解析到服务器IP
-   - 使用 Cloudflare DNS API 时，需要将 NS 指向 **Cloudflare**
+   - 仅 Hysteria 2 和 VLESS WS TLS 需要 TLS 证书
+   - 仅使用 VLESS Reality 或 Shadowsocks 2022 时无需域名和证书
 
 3. **Cloudflare API Token（可选）**
    - 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
-   - 创建一个 API Token，权限需包含 `Zone.DNS 编辑`
+   - 创建 API Token，权限需包含 `Zone.DNS 编辑`
 
 ---
 
-## ⚙️ 安装方法
+## 安装方法
 ```bash
-wget -N --no-check-certificate https://raw.githubusercontent.com/chaconneX/one-click-hy2-reality/main/hy2_reality_install.sh && chmod +x hy2_reality_install.sh && bash hy2_reality_install.sh
+wget -N --no-check-certificate https://raw.githubusercontent.com/chaconneX/one-click-hy2-reality-ws/main/hy2_reality_install.sh && chmod +x hy2_reality_install.sh && bash hy2_reality_install.sh
 ```
 
-## 📝 安装选项说明
+---
+
+## 安装选项说明
+
+### 协议选择（新）
+
+安装向导会提示选择需要安装的协议：
+
+```
+请选择要安装的协议 (输入编号，空格分隔；直接回车安装全部):
+  1) Hysteria 2
+  2) VLESS Reality
+  3) VLESS WS TLS
+  4) Shadowsocks 2022
+
+选择协议 [默认: 全部]:
+```
+
+**示例：**
+- 直接回车 → 安装全部四种协议
+- `1 4` → 只安装 Hysteria 2 + Shadowsocks 2022
+- `2` → 只安装 VLESS Reality
+- `3 4` → 只安装 VLESS WS TLS + Shadowsocks 2022
+
+脚本会根据已选协议自动跳过不相关的配置步骤（如只选 Reality + SS2022 则跳过证书配置）。
 
 ### 证书配置
-- **自签名证书** → 快速安装，客户端需设置 insecure: true
+
+仅当选择了 **Hysteria 2** 或 **VLESS WS TLS** 时才需要配置证书：
+
+- **自签名证书** → 快速安装，客户端需设置 `insecure: true`
 - **Let's Encrypt (Standalone)** → 需要 80 端口，域名可托管在任何 DNS
 - **Let's Encrypt (Cloudflare API)** → 无需 80 端口，域名必须在 Cloudflare
 
-### 端口配置
-- **Hysteria 2**: 默认 443 (UDP)
-- **Reality**: 默认 8443 (TCP)
-- **VLESS WS TLS**: 默认 2053 (TCP)
+> VLESS Reality 和 Shadowsocks 2022 使用自身加密机制，**无需 TLS 证书**。
 
-### 其他配置
-- **Reality SNI**: 可选 Microsoft、Apple、Cloudflare 等
-- **WebSocket 路径**: 默认 /ws，可自定义
+### 端口配置
+
+| 协议 | 默认端口 | 协议类型 |
+|------|----------|---------|
+| Hysteria 2 | 443 | UDP |
+| VLESS Reality | 8443 | TCP |
+| VLESS WS TLS | 2053 | TCP |
+| Shadowsocks 2022 | 8388 | TCP/UDP |
+
+### Shadowsocks 2022 加密方式
+
+| 加密方式 | 密钥长度 | 说明 |
+|----------|---------|------|
+| `2022-blake3-aes-128-gcm` | 16 字节 | 推荐，性能好 |
+| `2022-blake3-aes-256-gcm` | 32 字节 | 更高安全性 |
+| `2022-blake3-chacha20-poly1305` | 32 字节 | 适合无 AES 硬件加速的设备 |
 
 ---
 
-## 🔀 中转服务器模式
+## 中转服务器模式
 
-脚本支持 **中转VPS → 落地VPS** 架构，可以通过中转服务器转发流量到落地服务器。
+脚本支持 **中转VPS → 落地VPS** 架构，支持四种协议作为落地连接协议。
 
 ### 使用场景
 - 落地VPS线路好但直连不稳定
@@ -88,48 +126,46 @@ wget -N --no-check-certificate https://raw.githubusercontent.com/chaconneX/one-c
 ### 部署步骤
 
 #### 1. 先部署落地服务器
-在落地VPS上运行脚本，选择 **"落地服务器"** 模式：
 ```bash
 bash hy2_reality_install.sh
 # 选择 1) 落地服务器 (直接出口)
 ```
 
-安装完成后，记录以下信息（根据你选择的协议）：
-- **Hysteria 2**: 服务器地址、端口、密码
-- **VLESS Reality**: 服务器地址、端口、UUID、Public Key、Short ID、SNI
-- **VLESS WS TLS**: 服务器地址、端口、UUID、路径
+安装完成后，记录以下信息（根据你选择的落地协议）：
+
+| 落地协议 | 需要记录的参数 |
+|---------|--------------|
+| Hysteria 2 | 地址、端口、密码 |
+| VLESS Reality | 地址、端口、UUID、Public Key、Short ID、SNI |
+| VLESS WS TLS | 地址、端口、UUID、路径 |
+| Shadowsocks 2022 | 地址、端口、加密方式、密码 |
 
 #### 2. 再部署中转服务器
-在中转VPS上运行脚本，选择 **"中转服务器"** 模式：
 ```bash
 bash hy2_reality_install.sh
 # 选择 2) 中转服务器 (转发到落地VPS)
+# 选择入口协议（客户端连接中转用的协议）
+# 选择落地协议（中转连接落地用的协议）
 ```
 
-配置时需要输入落地服务器的信息：
-- 落地服务器地址（IP或域名）
-- 落地服务器协议类型（Hysteria 2 / VLESS Reality / VLESS WS TLS）
-- 落地服务器的连接参数
-
 #### 3. 客户端连接
-客户端使用中转服务器的连接信息（IP、端口、密码等），流量会自动转发到落地服务器。
+客户端使用中转服务器的连接信息，流量自动转发到落地服务器。
 
 ### 架构示意
 ```
-客户端 → 中转VPS (Hy2/Reality/WS入口) → 落地VPS (Hy2/Reality/WS出口) → 互联网
+客户端 → 中转VPS (任意协议入口) → 落地VPS (任意协议出口) → 互联网
 ```
 
 ### 注意事项
-- 中转服务器和落地服务器都需要运行本脚本
-- 中转服务器可以使用与落地服务器不同的协议（如中转用Reality，落地用Hy2）
+- 中转和落地可以使用不同协议（如中转用 Reality 入口，落地用 SS2022 出口）
+- Shadowsocks 2022 作为落地连接时，密码需要从落地服务器的配置信息中复制
 - 确保落地服务器的端口在防火墙中已开放
-- 中转服务器需要能够连接到落地服务器
 
 ---
 
-## ⚡ VPS 系统调优
+## VPS 系统调优
 
-脚本内置 VPS 调优功能，可以显著提升代理性能、降低延迟。
+脚本内置 VPS 调优功能，可显著提升代理性能、降低延迟。
 
 ### 调优内容
 
@@ -142,52 +178,27 @@ bash hy2_reality_install.sh
 | **低延迟参数** | 端口范围、ARP缓存等 | 整体降低网络延迟 |
 
 ### 使用方法
-
-运行脚本后选择 **"4) VPS 系统调优"**：
-
 ```bash
 bash hy2_reality_install.sh
-# 选择 4) VPS 系统调优 (BBR + TCP优化)
+# 选择 5) VPS 系统调优 (BBR + TCP优化)
 ```
 
-### 调优选项
-
-- **一键全面优化（推荐）** - 应用所有优化项
-- **仅开启 BBR** - 只启用 BBR 拥塞控制
-- **仅优化 TCP 参数** - TCP 缓冲区和超时优化
-- **仅优化 UDP/QUIC** - 针对 Hysteria 2 的 UDP 优化
-- **仅优化系统限制** - 增大文件描述符限制
-- **仅优化低延迟参数** - 网络延迟相关优化
-- **恢复默认配置** - 回滚到优化前的状态
-
-### 系统要求
-
-- **BBR**: 需要 Linux 内核 4.9 或更高版本
-- 大多数现代 VPS（Ubuntu 18.04+、Debian 10+、CentOS 8+）默认满足要求
-
-### 查看当前状态
-
-调优菜单会自动显示当前系统状态：
-- 当前 TCP 拥塞控制算法
-- BBR 是否启用
-- TCP Fast Open 状态
-- 文件描述符限制
-- 内核版本
+**系统要求：** BBR 需要 Linux 内核 4.9+，现代 VPS 默认满足。
 
 ---
 
-## 📂 文件位置
+## 文件位置
 
 | 文件 | 路径 |
 |------|------|
-| 配置文件 | `/etc/sing-box/config.json` |
-| 证书目录 | `/etc/sing-box/certs/` |
-| 配置信息 | `/root/sing-box-info.txt` |
-| 分享链接 | `/root/share_links.txt` |
+| sing-box 配置 | `/etc/sing-box/config.json` |
+| TLS 证书目录 | `/etc/sing-box/certs/` |
+| 配置信息汇总 | `/root/sing-box-info.txt` |
+| 所有分享链接 | `/root/share_links.txt` |
 
 ---
 
-## 🔧 服务管理
+## 服务管理
 
 ```bash
 # 查看服务状态
@@ -205,18 +216,7 @@ journalctl -u sing-box -f
 
 ---
 
-## ⚙️ 输出信息
-
-安装完成后，脚本会输出：
-- Hysteria 2 配置信息和分享链接
-- VLESS Reality 配置信息和分享链接
-- VLESS WS TLS 配置信息和分享链接
-- 客户端连接参数
-- 二维码（支持手机扫码导入）
-
----
-
-## 📱 客户端推荐
+## 客户端推荐
 
 | 平台 | 推荐客户端 |
 |------|-----------|
@@ -225,9 +225,21 @@ journalctl -u sing-box -f
 | iOS | Shadowrocket, Quantumult X, Stash |
 | Android | v2rayNG, Clash for Android, NekoBox |
 
+> Shadowsocks 2022 需要客户端支持 `2022-blake3-*` 系列加密方式，推荐使用上述列表中较新版本的客户端。
+
 ---
 
-## ⚠️ 声明
+## 版本历史
 
-本项目仅用于学习与研究，请勿用于任何非法用途。
-作者不对使用过程中的后果负责。
+| 版本 | 新增内容 |
+|------|---------|
+| v7.0 | 新增 Shadowsocks 2022 协议；支持按需选择安装协议 |
+| v6.0 | 新增 VPS 系统调优（BBR + TCP/UDP优化） |
+| v5.0 | 新增 VLESS WS TLS 协议 |
+| v4.0 | 新增中转服务器模式 |
+
+---
+
+## 声明
+
+本项目仅用于学习与研究，请勿用于任何非法用途。作者不对使用过程中的后果负责。
