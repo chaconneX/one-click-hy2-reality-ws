@@ -21,6 +21,12 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# 协议安装开关 (由 interactive_config 设置)
+INSTALL_HY2=true
+INSTALL_REALITY=true
+INSTALL_VLESS_WS=true
+INSTALL_SS2022=true
+
 # 配置参数
 HY2_PORT=""
 REALITY_PORT=""
@@ -1082,123 +1088,173 @@ interactive_config() {
     fi
     print_success "服务器 IP: $SERVER_IP"
     echo ""
-    
-    # 证书配置
-    echo -e "${YELLOW}━━━ 证书配置 ━━━${NC}"
-    echo "  1) 自签名证书 (快速安装，客户端需设置 insecure: true)"
-    echo "  2) Let's Encrypt 证书 (需要域名，更安全)"
-    read -p "请选择 [默认: 2]: " cert_choice
-    cert_choice=${cert_choice:-2}
-    
-    if [ "$cert_choice" = "2" ]; then
-        while true; do
-            read -p "请输入你的域名 (例: proxy.example.com): " CERT_DOMAIN
-            if [ -z "$CERT_DOMAIN" ]; then
-                print_error "域名不能为空"
-                continue
-            fi
-            
-            if [[ ! "$CERT_DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$ ]]; then
-                print_error "域名格式不正确"
-                continue
-            fi
-            
-            break
-        done
-        
-        USE_ACME=true
-        
-        echo ""
-        echo -e "${YELLOW}━━━ 证书申请方式 ━━━${NC}"
-        echo "  1) Standalone 模式 (推荐)"
-        echo "     - 需要 80 端口"
-        echo "     - 域名可托管在任何 DNS 服务商"
-        echo "     - 适合新手和测试"
-        echo ""
-        echo "  2) Cloudflare DNS API (高级)"
-        echo "     - 不需要 80 端口"
-        echo "     - 域名必须在 Cloudflare 托管"
-        echo "     - 需要 API Token"
-        echo "     - 续期更可靠，支持泛域名"
-        echo ""
-        read -p "请选择 [默认: 1]: " dns_choice
-        dns_choice=${dns_choice:-1}
-        
-        if [ "$dns_choice" = "2" ]; then
-            DNS_PROVIDER="cloudflare"
-            echo ""
-            print_warning "域名必须已在 Cloudflare 并解析到: ${SERVER_IP}"
-            echo ""
-            echo -e "${BLUE}获取 Cloudflare API Token:${NC}"
-            echo "  1. 访问: https://dash.cloudflare.com/profile/api-tokens"
-            echo "  2. Create Token → Edit zone DNS"
-            echo "  3. Zone Resources: 选择你的域名"
-            echo "  4. 复制生成的 Token"
-            echo ""
-            read -p "请输入 Cloudflare API Token: " CF_API_TOKEN
-        else
-            DNS_PROVIDER="standalone"
-            print_info "将使用 Standalone 模式 (需要 80 端口)"
-            echo ""
-            print_warning "请确保域名 ${CERT_DOMAIN} 已解析到: ${SERVER_IP}"
-            read -p "域名是否已正确解析? (y/n): " dns_ready
-            if [[ ! "$dns_ready" =~ ^[Yy]$ ]]; then
-                print_error "请先配置 DNS 解析后再运行此脚本"
-                exit 1
-            fi
-        fi
+
+    # 协议选择
+    echo -e "${YELLOW}━━━ 协议选择 ━━━${NC}"
+    echo "请选择要安装的协议 (输入编号，空格分隔；直接回车安装全部):"
+    echo "  1) Hysteria 2"
+    echo "  2) VLESS Reality"
+    echo "  3) VLESS WS TLS"
+    echo "  4) Shadowsocks 2022"
+    echo ""
+    read -p "选择协议 [默认: 全部]: " proto_input
+
+    INSTALL_HY2=false
+    INSTALL_REALITY=false
+    INSTALL_VLESS_WS=false
+    INSTALL_SS2022=false
+
+    if [ -z "$proto_input" ]; then
+        INSTALL_HY2=true
+        INSTALL_REALITY=true
+        INSTALL_VLESS_WS=true
+        INSTALL_SS2022=true
     else
-        USE_ACME=false
-        print_info "将使用自签名证书"
+        for _c in $proto_input; do
+            case $_c in
+                1) INSTALL_HY2=true ;;
+                2) INSTALL_REALITY=true ;;
+                3) INSTALL_VLESS_WS=true ;;
+                4) INSTALL_SS2022=true ;;
+            esac
+        done
+        if [ "$INSTALL_HY2" = false ] && [ "$INSTALL_REALITY" = false ] && \
+           [ "$INSTALL_VLESS_WS" = false ] && [ "$INSTALL_SS2022" = false ]; then
+            print_error "至少需要选择一个协议"
+            exit 1
+        fi
     fi
-    
+
+    local selected_list=""
+    [ "$INSTALL_HY2" = true ]      && selected_list="${selected_list} Hysteria2"
+    [ "$INSTALL_REALITY" = true ]  && selected_list="${selected_list} Reality"
+    [ "$INSTALL_VLESS_WS" = true ] && selected_list="${selected_list} VLESS-WS"
+    [ "$INSTALL_SS2022" = true ]   && selected_list="${selected_list} SS2022"
+    print_success "已选协议:${selected_list}"
     echo ""
-    
-    # 端口配置
+
+    # 证书配置 (仅 Hysteria 2 / VLESS WS TLS 需要 TLS 证书)
+    if [ "$INSTALL_HY2" = true ] || [ "$INSTALL_VLESS_WS" = true ]; then
+        echo -e "${YELLOW}━━━ 证书配置 ━━━${NC}"
+        echo "  1) 自签名证书 (快速安装，客户端需设置 insecure: true)"
+        echo "  2) Let's Encrypt 证书 (需要域名，更安全)"
+        read -p "请选择 [默认: 2]: " cert_choice
+        cert_choice=${cert_choice:-2}
+
+        if [ "$cert_choice" = "2" ]; then
+            while true; do
+                read -p "请输入你的域名 (例: proxy.example.com): " CERT_DOMAIN
+                if [ -z "$CERT_DOMAIN" ]; then
+                    print_error "域名不能为空"
+                    continue
+                fi
+                if [[ ! "$CERT_DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$ ]]; then
+                    print_error "域名格式不正确"
+                    continue
+                fi
+                break
+            done
+
+            USE_ACME=true
+
+            echo ""
+            echo -e "${YELLOW}━━━ 证书申请方式 ━━━${NC}"
+            echo "  1) Standalone 模式 (推荐)"
+            echo "     - 需要 80 端口"
+            echo "     - 域名可托管在任何 DNS 服务商"
+            echo "     - 适合新手和测试"
+            echo ""
+            echo "  2) Cloudflare DNS API (高级)"
+            echo "     - 不需要 80 端口"
+            echo "     - 域名必须在 Cloudflare 托管"
+            echo "     - 需要 API Token"
+            echo "     - 续期更可靠，支持泛域名"
+            echo ""
+            read -p "请选择 [默认: 1]: " dns_choice
+            dns_choice=${dns_choice:-1}
+
+            if [ "$dns_choice" = "2" ]; then
+                DNS_PROVIDER="cloudflare"
+                echo ""
+                print_warning "域名必须已在 Cloudflare 并解析到: ${SERVER_IP}"
+                echo ""
+                echo -e "${BLUE}获取 Cloudflare API Token:${NC}"
+                echo "  1. 访问: https://dash.cloudflare.com/profile/api-tokens"
+                echo "  2. Create Token → Edit zone DNS"
+                echo "  3. Zone Resources: 选择你的域名"
+                echo "  4. 复制生成的 Token"
+                echo ""
+                read -p "请输入 Cloudflare API Token: " CF_API_TOKEN
+            else
+                DNS_PROVIDER="standalone"
+                print_info "将使用 Standalone 模式 (需要 80 端口)"
+                echo ""
+                print_warning "请确保域名 ${CERT_DOMAIN} 已解析到: ${SERVER_IP}"
+                read -p "域名是否已正确解析? (y/n): " dns_ready
+                if [[ ! "$dns_ready" =~ ^[Yy]$ ]]; then
+                    print_error "请先配置 DNS 解析后再运行此脚本"
+                    exit 1
+                fi
+            fi
+        else
+            USE_ACME=false
+            print_info "将使用自签名证书"
+        fi
+        echo ""
+    fi
+
+    # 端口配置 (按已选协议)
     echo -e "${YELLOW}━━━ 端口配置 ━━━${NC}"
-    read -p "Hysteria 2 端口 [默认: 443]: " input_hy2_port
-    HY2_PORT=${input_hy2_port:-443}
+    if [ "$INSTALL_HY2" = true ]; then
+        read -p "Hysteria 2 端口 [默认: 443]: " input_hy2_port
+        HY2_PORT=${input_hy2_port:-443}
+    fi
+    if [ "$INSTALL_REALITY" = true ]; then
+        read -p "Reality 端口 [默认: 8443]: " input_reality_port
+        REALITY_PORT=${input_reality_port:-8443}
+    fi
+    if [ "$INSTALL_VLESS_WS" = true ]; then
+        read -p "VLESS WS TLS 端口 [默认: 2053]: " input_vless_ws_port
+        VLESS_WS_PORT=${input_vless_ws_port:-2053}
+    fi
+    if [ "$INSTALL_SS2022" = true ]; then
+        read -p "Shadowsocks 2022 端口 [默认: 8388]: " input_ss2022_port
+        SS2022_PORT=${input_ss2022_port:-8388}
+    fi
 
-    read -p "Reality 端口 [默认: 8443]: " input_reality_port
-    REALITY_PORT=${input_reality_port:-8443}
+    if [ "$INSTALL_VLESS_WS" = true ]; then
+        echo ""
+        echo -e "${YELLOW}━━━ VLESS WS 路径配置 ━━━${NC}"
+        read -p "WebSocket 路径 [默认: /ws]: " input_ws_path
+        VLESS_WS_PATH=${input_ws_path:-/ws}
+    fi
 
-    read -p "VLESS WS TLS 端口 [默认: 2053]: " input_vless_ws_port
-    VLESS_WS_PORT=${input_vless_ws_port:-2053}
+    if [ "$INSTALL_REALITY" = true ]; then
+        echo ""
+        echo -e "${YELLOW}━━━ Reality SNI 配置 ━━━${NC}"
+        echo "推荐的 SNI 域名:"
+        echo "  1) www.microsoft.com (推荐)"
+        echo "  2) www.apple.com"
+        echo "  3) www.cloudflare.com"
+        echo "  4) www.bing.com"
+        echo "  5) 自定义"
 
-    read -p "Shadowsocks 2022 端口 [默认: 8388]: " input_ss2022_port
-    SS2022_PORT=${input_ss2022_port:-8388}
+        read -p "请选择 [默认: 1]: " sni_choice
+        sni_choice=${sni_choice:-1}
 
-    echo ""
-    echo -e "${YELLOW}━━━ VLESS WS 路径配置 ━━━${NC}"
-    read -p "WebSocket 路径 [默认: /ws]: " input_ws_path
-    VLESS_WS_PATH=${input_ws_path:-/ws}
+        case $sni_choice in
+            1) SNI="www.microsoft.com" ;;
+            2) SNI="www.apple.com" ;;
+            3) SNI="www.cloudflare.com" ;;
+            4) SNI="www.bing.com" ;;
+            5)
+                read -p "请输入自定义 SNI 域名: " custom_sni
+                SNI=${custom_sni:-www.microsoft.com}
+                ;;
+            *) SNI="www.microsoft.com" ;;
+        esac
+    fi
 
-    echo ""
-    
-    # SNI 配置
-    echo -e "${YELLOW}━━━ Reality SNI 配置 ━━━${NC}"
-    echo "推荐的 SNI 域名:"
-    echo "  1) www.microsoft.com (推荐)"
-    echo "  2) www.apple.com"
-    echo "  3) www.cloudflare.com"
-    echo "  4) www.bing.com"
-    echo "  5) 自定义"
-    
-    read -p "请选择 [默认: 1]: " sni_choice
-    sni_choice=${sni_choice:-1}
-    
-    case $sni_choice in
-        1) SNI="www.microsoft.com" ;;
-        2) SNI="www.apple.com" ;;
-        3) SNI="www.cloudflare.com" ;;
-        4) SNI="www.bing.com" ;;
-        5)
-            read -p "请输入自定义 SNI 域名: " custom_sni
-            SNI=${custom_sni:-www.microsoft.com}
-            ;;
-        *) SNI="www.microsoft.com" ;;
-    esac
-    
     echo ""
 
     # 中转服务器配置
@@ -1315,46 +1371,35 @@ interactive_config() {
     echo -e "${CYAN}  配置确认${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "${GREEN}服务器类型:${NC}     $([ "$SERVER_TYPE" = "relay" ] && echo "中转服务器" || echo "落地服务器")"
-    echo -e "${GREEN}服务器 IP:${NC}      $SERVER_IP"
-    if [ "$USE_ACME" = true ]; then
-        echo -e "${GREEN}域名:${NC}           $CERT_DOMAIN"
-        echo -e "${GREEN}证书申请:${NC}       $DNS_PROVIDER"
-    else
-        echo -e "${GREEN}证书:${NC}           自签名证书"
+    echo -e "${GREEN}服务器类型:${NC}   $([ "$SERVER_TYPE" = "relay" ] && echo "中转服务器" || echo "落地服务器")"
+    echo -e "${GREEN}服务器 IP:${NC}    $SERVER_IP"
+    if [ "$INSTALL_HY2" = true ] || [ "$INSTALL_VLESS_WS" = true ]; then
+        if [ "$USE_ACME" = true ]; then
+            echo -e "${GREEN}域名:${NC}         $CERT_DOMAIN"
+            echo -e "${GREEN}证书申请:${NC}     $DNS_PROVIDER"
+        else
+            echo -e "${GREEN}证书:${NC}         自签名证书"
+        fi
     fi
-    echo -e "${GREEN}Hysteria 2 端口:${NC}      $HY2_PORT"
-    echo -e "${GREEN}Reality 端口:${NC}         $REALITY_PORT"
-    echo -e "${GREEN}Reality SNI:${NC}          $SNI"
-    echo -e "${GREEN}VLESS WS 端口:${NC}        $VLESS_WS_PORT"
-    echo -e "${GREEN}VLESS WS 路径:${NC}        $VLESS_WS_PATH"
-    echo -e "${GREEN}Shadowsocks 2022 端口:${NC} $SS2022_PORT"
-    echo -e "${GREEN}Shadowsocks 2022 加密:${NC} $SS2022_METHOD"
+    echo -e "${GREEN}已选协议:${NC}    ${selected_list}"
+    [ "$INSTALL_HY2" = true ]      && echo -e "  ${GREEN}Hysteria 2 端口:${NC}  $HY2_PORT"
+    [ "$INSTALL_REALITY" = true ]  && echo -e "  ${GREEN}Reality 端口:${NC}     $REALITY_PORT  SNI: $SNI"
+    [ "$INSTALL_VLESS_WS" = true ] && echo -e "  ${GREEN}VLESS WS 端口:${NC}    $VLESS_WS_PORT  路径: $VLESS_WS_PATH"
+    [ "$INSTALL_SS2022" = true ]   && echo -e "  ${GREEN}SS2022 端口:${NC}      $SS2022_PORT  加密: $SS2022_METHOD"
 
     if [ "$SERVER_TYPE" = "relay" ]; then
         echo ""
         echo -e "${YELLOW}落地服务器:${NC}"
-        echo -e "${GREEN}  地址:${NC}         $RELAY_BACKEND_ADDR"
+        echo -e "${GREEN}  地址:${NC}  $RELAY_BACKEND_ADDR"
         case "$RELAY_BACKEND_TYPE" in
-            hy2) echo -e "${GREEN}  协议:${NC}         Hysteria 2" ;;
-            vless) echo -e "${GREEN}  协议:${NC}         VLESS Reality" ;;
-            vless-ws) echo -e "${GREEN}  协议:${NC}         VLESS WS TLS" ;;
-            ss2022) echo -e "${GREEN}  协议:${NC}         Shadowsocks 2022" ;;
+            hy2)      echo -e "${GREEN}  协议:${NC}  Hysteria 2 | 端口: $RELAY_BACKEND_HY2_PORT" ;;
+            vless)    echo -e "${GREEN}  协议:${NC}  VLESS Reality | 端口: $RELAY_BACKEND_VLESS_PORT" ;;
+            vless-ws) echo -e "${GREEN}  协议:${NC}  VLESS WS TLS | 端口: $RELAY_BACKEND_VLESS_WS_PORT" ;;
+            ss2022)   echo -e "${GREEN}  协议:${NC}  SS2022 | 端口: $RELAY_BACKEND_SS2022_PORT | 加密: $RELAY_BACKEND_SS2022_METHOD" ;;
         esac
-        if [ "$RELAY_BACKEND_TYPE" = "hy2" ]; then
-            echo -e "${GREEN}  端口:${NC}         $RELAY_BACKEND_HY2_PORT"
-        elif [ "$RELAY_BACKEND_TYPE" = "vless" ]; then
-            echo -e "${GREEN}  端口:${NC}         $RELAY_BACKEND_VLESS_PORT"
-        elif [ "$RELAY_BACKEND_TYPE" = "ss2022" ]; then
-            echo -e "${GREEN}  端口:${NC}         $RELAY_BACKEND_SS2022_PORT"
-            echo -e "${GREEN}  加密:${NC}         $RELAY_BACKEND_SS2022_METHOD"
-        else
-            echo -e "${GREEN}  端口:${NC}         $RELAY_BACKEND_VLESS_WS_PORT"
-            echo -e "${GREEN}  路径:${NC}         $RELAY_BACKEND_VLESS_WS_PATH"
-        fi
     fi
     echo ""
-    
+
     read -p "确认以上配置并开始安装? (y/n): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         print_warning "安装已取消"
@@ -1362,11 +1407,17 @@ interactive_config() {
         show_main_menu
         exit 0
     fi
-    
+
     echo ""
 }
 
 setup_certificate() {
+    # Reality 和 SS2022 不需要 TLS 证书
+    if [ "$INSTALL_HY2" = false ] && [ "$INSTALL_VLESS_WS" = false ]; then
+        print_info "所选协议无需 TLS 证书，跳过证书配置"
+        return
+    fi
+
     if [ "$USE_ACME" != true ]; then
         print_info "生成自签名证书..."
         mkdir -p /etc/sing-box/certs
@@ -1437,18 +1488,25 @@ setup_certificate() {
 generate_config() {
     print_info "生成配置参数..."
 
-    HY2_PASSWORD=$(cat /proc/sys/kernel/random/uuid)
-    REALITY_UUID=$(cat /proc/sys/kernel/random/uuid)
-    VLESS_WS_UUID=$(cat /proc/sys/kernel/random/uuid)
+    if [ "$INSTALL_HY2" = true ]; then
+        HY2_PASSWORD=$(cat /proc/sys/kernel/random/uuid)
+    fi
 
-    REALITY_KEYS=$(sing-box generate reality-keypair)
-    REALITY_PRIVATE_KEY=$(echo "$REALITY_KEYS" | grep "PrivateKey:" | awk '{print $2}')
-    REALITY_PUBLIC_KEY=$(echo "$REALITY_KEYS" | grep "PublicKey:" | awk '{print $2}')
+    if [ "$INSTALL_REALITY" = true ]; then
+        REALITY_UUID=$(cat /proc/sys/kernel/random/uuid)
+        REALITY_KEYS=$(sing-box generate reality-keypair)
+        REALITY_PRIVATE_KEY=$(echo "$REALITY_KEYS" | grep "PrivateKey:" | awk '{print $2}')
+        REALITY_PUBLIC_KEY=$(echo "$REALITY_KEYS" | grep "PublicKey:" | awk '{print $2}')
+        REALITY_SHORT_ID=$(openssl rand -hex 8)
+    fi
 
-    REALITY_SHORT_ID=$(openssl rand -hex 8)
+    if [ "$INSTALL_VLESS_WS" = true ]; then
+        VLESS_WS_UUID=$(cat /proc/sys/kernel/random/uuid)
+    fi
 
-    # SS2022 密码: 2022-blake3-aes-128-gcm 需要 16 字节的 base64 密钥
-    SS2022_PASSWORD=$(openssl rand -base64 16)
+    if [ "$INSTALL_SS2022" = true ]; then
+        SS2022_PASSWORD=$(openssl rand -base64 16)
+    fi
 
     print_success "配置参数生成完成"
 }
@@ -1566,81 +1624,74 @@ OUTBOUND_EOF
 )
     fi
 
-    cat > /etc/sing-box/config.json <<EOF
-{
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
-  "inbounds": [
+    # 动态构建 inbounds 数组
+    local _inbounds=()
+
+    if [ "$INSTALL_HY2" = true ]; then
+        _inbounds+=("$(cat <<IEOF
     {
       "type": "hysteria2",
       "tag": "hy2-in",
       "listen": "::",
       "listen_port": ${HY2_PORT},
-      "users": [
-        {
-          "password": "${HY2_PASSWORD}"
-        }
-      ],
+      "users": [{"password": "${HY2_PASSWORD}"}],
       "tls": {
         "enabled": true,
         "server_name": "${SERVER_NAME}",
         "key_path": "/etc/sing-box/certs/private.key",
         "certificate_path": "/etc/sing-box/certs/cert.crt",
-        "alpn": [
-          "h3"
-        ]
+        "alpn": ["h3"]
       }
-    },
+    }
+IEOF
+)")
+    fi
+
+    if [ "$INSTALL_REALITY" = true ]; then
+        _inbounds+=("$(cat <<IEOF
     {
       "type": "vless",
       "tag": "vless-in",
       "listen": "::",
       "listen_port": ${REALITY_PORT},
-      "users": [
-        {
-          "uuid": "${REALITY_UUID}",
-          "flow": "xtls-rprx-vision"
-        }
-      ],
+      "users": [{"uuid": "${REALITY_UUID}", "flow": "xtls-rprx-vision"}],
       "tls": {
         "enabled": true,
         "server_name": "${SNI}",
         "reality": {
           "enabled": true,
-          "handshake": {
-            "server": "${SNI}",
-            "server_port": 443
-          },
+          "handshake": {"server": "${SNI}", "server_port": 443},
           "private_key": "${REALITY_PRIVATE_KEY}",
-          "short_id": [
-            "${REALITY_SHORT_ID}"
-          ]
+          "short_id": ["${REALITY_SHORT_ID}"]
         }
       }
-    },
+    }
+IEOF
+)")
+    fi
+
+    if [ "$INSTALL_VLESS_WS" = true ]; then
+        _inbounds+=("$(cat <<IEOF
     {
       "type": "vless",
       "tag": "vless-ws-in",
       "listen": "::",
       "listen_port": ${VLESS_WS_PORT},
-      "users": [
-        {
-          "uuid": "${VLESS_WS_UUID}"
-        }
-      ],
+      "users": [{"uuid": "${VLESS_WS_UUID}"}],
       "tls": {
         "enabled": true,
         "server_name": "${SERVER_NAME}",
         "key_path": "/etc/sing-box/certs/private.key",
         "certificate_path": "/etc/sing-box/certs/cert.crt"
       },
-      "transport": {
-        "type": "ws",
-        "path": "${VLESS_WS_PATH}"
-      }
-    },
+      "transport": {"type": "ws", "path": "${VLESS_WS_PATH}"}
+    }
+IEOF
+)")
+    fi
+
+    if [ "$INSTALL_SS2022" = true ]; then
+        _inbounds+=("$(cat <<IEOF
     {
       "type": "shadowsocks",
       "tag": "ss2022-in",
@@ -1649,6 +1700,30 @@ OUTBOUND_EOF
       "method": "${SS2022_METHOD}",
       "password": "${SS2022_PASSWORD}"
     }
+IEOF
+)")
+    fi
+
+    # 用逗号拼接
+    local _inbounds_json=""
+    local _first=true
+    for _ib in "${_inbounds[@]}"; do
+        if [ "$_first" = true ]; then
+            _inbounds_json="$_ib"
+            _first=false
+        else
+            _inbounds_json="${_inbounds_json},"$'\n'"${_ib}"
+        fi
+    done
+
+    cat > /etc/sing-box/config.json <<EOF
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+${_inbounds_json}
   ],
 ${OUTBOUND_CONFIG}
 }
@@ -1694,21 +1769,25 @@ configure_firewall() {
     print_info "配置防火墙..."
 
     if command -v ufw &> /dev/null; then
-        ufw allow ${HY2_PORT}/udp comment "Hysteria 2" >/dev/null 2>&1
-        ufw allow ${REALITY_PORT}/tcp comment "Reality" >/dev/null 2>&1
-        ufw allow ${VLESS_WS_PORT}/tcp comment "VLESS WS" >/dev/null 2>&1
-        ufw allow ${SS2022_PORT}/tcp comment "Shadowsocks 2022" >/dev/null 2>&1
-        ufw allow ${SS2022_PORT}/udp comment "Shadowsocks 2022" >/dev/null 2>&1
+        [ "$INSTALL_HY2" = true ]      && ufw allow ${HY2_PORT}/udp comment "Hysteria 2" >/dev/null 2>&1
+        [ "$INSTALL_REALITY" = true ]  && ufw allow ${REALITY_PORT}/tcp comment "Reality" >/dev/null 2>&1
+        [ "$INSTALL_VLESS_WS" = true ] && ufw allow ${VLESS_WS_PORT}/tcp comment "VLESS WS" >/dev/null 2>&1
+        if [ "$INSTALL_SS2022" = true ]; then
+            ufw allow ${SS2022_PORT}/tcp comment "Shadowsocks 2022" >/dev/null 2>&1
+            ufw allow ${SS2022_PORT}/udp comment "Shadowsocks 2022" >/dev/null 2>&1
+        fi
         ufw reload >/dev/null 2>&1 || true
         print_success "UFW 防火墙规则已添加"
     fi
 
     if command -v firewall-cmd &> /dev/null; then
-        firewall-cmd --permanent --add-port=${HY2_PORT}/udp >/dev/null 2>&1
-        firewall-cmd --permanent --add-port=${REALITY_PORT}/tcp >/dev/null 2>&1
-        firewall-cmd --permanent --add-port=${VLESS_WS_PORT}/tcp >/dev/null 2>&1
-        firewall-cmd --permanent --add-port=${SS2022_PORT}/tcp >/dev/null 2>&1
-        firewall-cmd --permanent --add-port=${SS2022_PORT}/udp >/dev/null 2>&1
+        [ "$INSTALL_HY2" = true ]      && firewall-cmd --permanent --add-port=${HY2_PORT}/udp >/dev/null 2>&1
+        [ "$INSTALL_REALITY" = true ]  && firewall-cmd --permanent --add-port=${REALITY_PORT}/tcp >/dev/null 2>&1
+        [ "$INSTALL_VLESS_WS" = true ] && firewall-cmd --permanent --add-port=${VLESS_WS_PORT}/tcp >/dev/null 2>&1
+        if [ "$INSTALL_SS2022" = true ]; then
+            firewall-cmd --permanent --add-port=${SS2022_PORT}/tcp >/dev/null 2>&1
+            firewall-cmd --permanent --add-port=${SS2022_PORT}/udp >/dev/null 2>&1
+        fi
         firewall-cmd --reload >/dev/null 2>&1
         print_success "firewalld 防火墙规则已添加"
     fi
@@ -1737,23 +1816,40 @@ generate_share_info() {
     # 确定连接地址
     if [ "$USE_ACME" = true ]; then
         CONNECT_ADDR="$CERT_DOMAIN"
-        HY2_LINK="hysteria2://${HY2_PASSWORD}@${CERT_DOMAIN}:${HY2_PORT}/?insecure=0&sni=${CERT_DOMAIN}#${CERT_DOMAIN}"
-        VLESS_WS_LINK="vless://${VLESS_WS_UUID}@${CERT_DOMAIN}:${VLESS_WS_PORT}?encryption=none&security=tls&sni=${CERT_DOMAIN}&type=ws&host=${CERT_DOMAIN}&path=$(echo ${VLESS_WS_PATH} | sed 's/\//%2F/g')#VLESS-WS-${CERT_DOMAIN}"
     else
         CONNECT_ADDR="$SERVER_IP"
-        HY2_LINK="hysteria2://${HY2_PASSWORD}@${SERVER_IP}:${HY2_PORT}/?insecure=1#Hysteria2-${SERVER_IP}"
-        VLESS_WS_LINK="vless://${VLESS_WS_UUID}@${SERVER_IP}:${VLESS_WS_PORT}?encryption=none&security=tls&sni=${SERVER_IP}&type=ws&host=${SERVER_IP}&path=$(echo ${VLESS_WS_PATH} | sed 's/\//%2F/g')&allowInsecure=1#VLESS-WS-${SERVER_IP}"
     fi
 
-    VLESS_LINK="vless://${REALITY_UUID}@${CONNECT_ADDR}:${REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#Reality-${CONNECT_ADDR}"
+    # 按已选协议生成分享链接
+    if [ "$INSTALL_HY2" = true ]; then
+        if [ "$USE_ACME" = true ]; then
+            HY2_LINK="hysteria2://${HY2_PASSWORD}@${CERT_DOMAIN}:${HY2_PORT}/?insecure=0&sni=${CERT_DOMAIN}#${CERT_DOMAIN}"
+        else
+            HY2_LINK="hysteria2://${HY2_PASSWORD}@${SERVER_IP}:${HY2_PORT}/?insecure=1#Hysteria2-${SERVER_IP}"
+        fi
+    fi
 
-    # SS2022 分享链接 (SIP002 格式)
-    local SS2022_USERINFO
-    SS2022_USERINFO=$(printf '%s' "${SS2022_METHOD}:${SS2022_PASSWORD}" | base64 -w 0)
-    SS2022_LINK="ss://${SS2022_USERINFO}@${CONNECT_ADDR}:${SS2022_PORT}#SS2022-${CONNECT_ADDR}"
-    
-    # 生成配置文件
-    cat > /root/sing-box-info.txt <<EOF
+    if [ "$INSTALL_REALITY" = true ]; then
+        VLESS_LINK="vless://${REALITY_UUID}@${CONNECT_ADDR}:${REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#Reality-${CONNECT_ADDR}"
+    fi
+
+    if [ "$INSTALL_VLESS_WS" = true ]; then
+        if [ "$USE_ACME" = true ]; then
+            VLESS_WS_LINK="vless://${VLESS_WS_UUID}@${CERT_DOMAIN}:${VLESS_WS_PORT}?encryption=none&security=tls&sni=${CERT_DOMAIN}&type=ws&host=${CERT_DOMAIN}&path=$(echo ${VLESS_WS_PATH} | sed 's/\//%2F/g')#VLESS-WS-${CERT_DOMAIN}"
+        else
+            VLESS_WS_LINK="vless://${VLESS_WS_UUID}@${SERVER_IP}:${VLESS_WS_PORT}?encryption=none&security=tls&sni=${SERVER_IP}&type=ws&host=${SERVER_IP}&path=$(echo ${VLESS_WS_PATH} | sed 's/\//%2F/g')&allowInsecure=1#VLESS-WS-${SERVER_IP}"
+        fi
+    fi
+
+    if [ "$INSTALL_SS2022" = true ]; then
+        local SS2022_USERINFO
+        SS2022_USERINFO=$(printf '%s' "${SS2022_METHOD}:${SS2022_PASSWORD}" | base64 -w 0)
+        SS2022_LINK="ss://${SS2022_USERINFO}@${CONNECT_ADDR}:${SS2022_PORT}#SS2022-${CONNECT_ADDR}"
+    fi
+
+    # 生成配置文件 (分段写入，按已选协议)
+    {
+        cat <<EOF
 ╔═══════════════════════════════════════════════════════════════╗
 ║                    Sing-box 配置信息                          ║
 ╚═══════════════════════════════════════════════════════════════╝
@@ -1761,9 +1857,13 @@ generate_share_info() {
 服务器信息:
   类型: $([ "$SERVER_TYPE" = "relay" ] && echo "中转服务器" || echo "落地服务器")
   IP 地址: ${SERVER_IP}
-$([ "$USE_ACME" = true ] && echo "  域名: ${CERT_DOMAIN}")
-$([ "$USE_ACME" = true ] && echo "  证书: Let's Encrypt ($DNS_PROVIDER)" || echo "  证书: 自签名证书")
+EOF
+        [ "$USE_ACME" = true ] && echo "  域名: ${CERT_DOMAIN}"
+        [ "$USE_ACME" = true ] && echo "  证书: Let's Encrypt ($DNS_PROVIDER)" || echo "  证书: 自签名证书 (Reality/SS2022无需证书)"
+        echo ""
 
+        if [ "$INSTALL_HY2" = true ]; then
+            cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Hysteria 2 配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1776,13 +1876,18 @@ Hysteria 2 配置
 ---
 server: ${CONNECT_ADDR}:${HY2_PORT}
 auth: ${HY2_PASSWORD}
-$([ "$USE_ACME" = true ] && echo "tls:" || echo "tls:")
+tls:
 $([ "$USE_ACME" = true ] && echo "  sni: ${CERT_DOMAIN}" || echo "  insecure: true")
 ---
 
 Hysteria 2 分享链接:
 ${HY2_LINK}
 
+EOF
+        fi
+
+        if [ "$INSTALL_REALITY" = true ]; then
+            cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 VLESS Reality 配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1798,6 +1903,11 @@ Short ID: ${REALITY_SHORT_ID}
 VLESS 分享链接:
 ${VLESS_LINK}
 
+EOF
+        fi
+
+        if [ "$INSTALL_VLESS_WS" = true ]; then
+            cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 VLESS WS TLS 配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1813,6 +1923,11 @@ $([ "$USE_ACME" != true ] && echo "注意: 使用自签名证书，客户端需�
 VLESS WS 分享链接:
 ${VLESS_WS_LINK}
 
+EOF
+        fi
+
+        if [ "$INSTALL_SS2022" = true ]; then
+            cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Shadowsocks 2022 配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1825,7 +1940,11 @@ Shadowsocks 2022 配置
 SS2022 分享链接:
 ${SS2022_LINK}
 
-$([ "$SERVER_TYPE" = "relay" ] && cat <<RELAY_INFO
+EOF
+        fi
+
+        if [ "$SERVER_TYPE" = "relay" ]; then
+            cat <<EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 落地服务器配置 (中转模式)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1833,25 +1952,17 @@ $([ "$SERVER_TYPE" = "relay" ] && cat <<RELAY_INFO
 ⚠️  注意: 此服务器为中转服务器，流量将转发到以下落地服务器
 
 落地服务器地址: ${RELAY_BACKEND_ADDR}
-$(case "$RELAY_BACKEND_TYPE" in
-    hy2) echo "协议类型: Hysteria 2
-端口: ${RELAY_BACKEND_HY2_PORT}
-密码: ${RELAY_BACKEND_HY2_PASSWORD}" ;;
-    vless) echo "协议类型: VLESS Reality
-端口: ${RELAY_BACKEND_VLESS_PORT}
-UUID: ${RELAY_BACKEND_VLESS_UUID}" ;;
-    vless-ws) echo "协议类型: VLESS WS TLS
-端口: ${RELAY_BACKEND_VLESS_WS_PORT}
-UUID: ${RELAY_BACKEND_VLESS_WS_UUID}
-路径: ${RELAY_BACKEND_VLESS_WS_PATH}" ;;
-    ss2022) echo "协议类型: Shadowsocks 2022
-端口: ${RELAY_BACKEND_SS2022_PORT}
-加密: ${RELAY_BACKEND_SS2022_METHOD}
-密码: ${RELAY_BACKEND_SS2022_PASSWORD}" ;;
-esac)
+EOF
+            case "$RELAY_BACKEND_TYPE" in
+                hy2)      printf "协议类型: Hysteria 2\n端口: %s\n密码: %s\n" "$RELAY_BACKEND_HY2_PORT" "$RELAY_BACKEND_HY2_PASSWORD" ;;
+                vless)    printf "协议类型: VLESS Reality\n端口: %s\nUUID: %s\n" "$RELAY_BACKEND_VLESS_PORT" "$RELAY_BACKEND_VLESS_UUID" ;;
+                vless-ws) printf "协议类型: VLESS WS TLS\n端口: %s\nUUID: %s\n路径: %s\n" "$RELAY_BACKEND_VLESS_WS_PORT" "$RELAY_BACKEND_VLESS_WS_UUID" "$RELAY_BACKEND_VLESS_WS_PATH" ;;
+                ss2022)   printf "协议类型: Shadowsocks 2022\n端口: %s\n加密: %s\n密码: %s\n" "$RELAY_BACKEND_SS2022_PORT" "$RELAY_BACKEND_SS2022_METHOD" "$RELAY_BACKEND_SS2022_PASSWORD" ;;
+            esac
+            echo ""
+        fi
 
-RELAY_INFO
-)
+        cat <<'EOF'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 文件位置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1862,31 +1973,40 @@ RELAY_INFO
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
+    } > /root/sing-box-info.txt
 
-    echo "$HY2_LINK" > /root/hy2_link.txt
-    echo "$VLESS_LINK" > /root/vless_link.txt
-    echo "$VLESS_WS_LINK" > /root/vless_ws_link.txt
-    echo "$SS2022_LINK" > /root/ss2022_link.txt
+    # 写入各协议单独链接文件
+    [ "$INSTALL_HY2" = true ]      && echo "$HY2_LINK"      > /root/hy2_link.txt
+    [ "$INSTALL_REALITY" = true ]  && echo "$VLESS_LINK"    > /root/vless_link.txt
+    [ "$INSTALL_VLESS_WS" = true ] && echo "$VLESS_WS_LINK" > /root/vless_ws_link.txt
+    [ "$INSTALL_SS2022" = true ]   && echo "$SS2022_LINK"   > /root/ss2022_link.txt
 
-    cat > /root/share_links.txt <<EOF
-Hysteria 2: ${HY2_LINK}
+    # 汇总分享链接
+    {
+        [ "$INSTALL_HY2" = true ]      && printf "Hysteria 2: %s\n\n"        "$HY2_LINK"
+        [ "$INSTALL_REALITY" = true ]  && printf "VLESS Reality: %s\n\n"     "$VLESS_LINK"
+        [ "$INSTALL_VLESS_WS" = true ] && printf "VLESS WS TLS: %s\n\n"      "$VLESS_WS_LINK"
+        [ "$INSTALL_SS2022" = true ]   && printf "Shadowsocks 2022: %s\n\n"  "$SS2022_LINK"
+    } > /root/share_links.txt
 
-VLESS Reality: ${VLESS_LINK}
-
-VLESS WS TLS: ${VLESS_WS_LINK}
-
-Shadowsocks 2022: ${SS2022_LINK}
-EOF
-
+    # 二维码
     if command -v qrencode &> /dev/null; then
-        qrencode -t ANSIUTF8 -o /root/hy2_qr.txt "$HY2_LINK" 2>/dev/null || true
-        qrencode -t PNG -o /root/hy2_qr.png "$HY2_LINK" 2>/dev/null || true
-        qrencode -t ANSIUTF8 -o /root/vless_qr.txt "$VLESS_LINK" 2>/dev/null || true
-        qrencode -t PNG -o /root/vless_qr.png "$VLESS_LINK" 2>/dev/null || true
-        qrencode -t ANSIUTF8 -o /root/vless_ws_qr.txt "$VLESS_WS_LINK" 2>/dev/null || true
-        qrencode -t PNG -o /root/vless_ws_qr.png "$VLESS_WS_LINK" 2>/dev/null || true
-        qrencode -t ANSIUTF8 -o /root/ss2022_qr.txt "$SS2022_LINK" 2>/dev/null || true
-        qrencode -t PNG -o /root/ss2022_qr.png "$SS2022_LINK" 2>/dev/null || true
+        if [ "$INSTALL_HY2" = true ]; then
+            qrencode -t ANSIUTF8 -o /root/hy2_qr.txt "$HY2_LINK" 2>/dev/null || true
+            qrencode -t PNG      -o /root/hy2_qr.png "$HY2_LINK" 2>/dev/null || true
+        fi
+        if [ "$INSTALL_REALITY" = true ]; then
+            qrencode -t ANSIUTF8 -o /root/vless_qr.txt "$VLESS_LINK" 2>/dev/null || true
+            qrencode -t PNG      -o /root/vless_qr.png "$VLESS_LINK" 2>/dev/null || true
+        fi
+        if [ "$INSTALL_VLESS_WS" = true ]; then
+            qrencode -t ANSIUTF8 -o /root/vless_ws_qr.txt "$VLESS_WS_LINK" 2>/dev/null || true
+            qrencode -t PNG      -o /root/vless_ws_qr.png "$VLESS_WS_LINK" 2>/dev/null || true
+        fi
+        if [ "$INSTALL_SS2022" = true ]; then
+            qrencode -t ANSIUTF8 -o /root/ss2022_qr.txt "$SS2022_LINK" 2>/dev/null || true
+            qrencode -t PNG      -o /root/ss2022_qr.png "$SS2022_LINK" 2>/dev/null || true
+        fi
     fi
 
     print_success "配置信息已保存"
@@ -1897,113 +2017,96 @@ show_result() {
     echo -e "${PURPLE}"
     cat << "EOF"
 ╔═══════════════════════════════════════════════════════════════╗
-║                  🎉 安装完成！                                ║
+║                  安装完成！                                   ║
 ╚═══════════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
-    
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  Hysteria 2 配置${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if [ "$USE_ACME" = true ]; then
-        echo -e "${CYAN}连接: ${CERT_DOMAIN}:${HY2_PORT}${NC}"
-    else
-        echo -e "${CYAN}连接: ${SERVER_IP}:${HY2_PORT}${NC}"
-        echo -e "${YELLOW}注意: 客户端需设置 insecure: true${NC}"
-    fi
-    echo -e "${CYAN}密码: ${HY2_PASSWORD}${NC}"
-    echo ""
-    echo -e "${YELLOW}分享链接:${NC}"
-    echo "${HY2_LINK}"
-    echo ""
 
-    if [ -f /root/hy2_qr.txt ]; then
+    if [ "$INSTALL_HY2" = true ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  二维码${NC}"
-        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo ""
-        cat /root/hy2_qr.txt 2>/dev/null || true
-        echo ""
-    fi
-    
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  VLESS Reality 配置${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if [ "$USE_ACME" = true ]; then
-        echo -e "${CYAN}连接: ${CERT_DOMAIN}:${REALITY_PORT}${NC}"
-    else
-        echo -e "${CYAN}连接: ${SERVER_IP}:${REALITY_PORT}${NC}"
-    fi
-    echo -e "${CYAN}UUID: ${REALITY_UUID}${NC}"
-    echo -e "${CYAN}SNI: ${SNI}${NC}"
-    echo ""
-    echo -e "${YELLOW}分享链接:${NC}"
-    echo "${VLESS_LINK}"
-    echo ""
-    
-    if [ -f /root/vless_qr.txt ]; then
-        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  二维码${NC}"
+        echo -e "${GREEN}  Hysteria 2 配置${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        cat /root/vless_qr.txt 2>/dev/null || true
+        if [ "$USE_ACME" = true ]; then
+            echo -e "${CYAN}连接: ${CERT_DOMAIN}:${HY2_PORT}${NC}"
+        else
+            echo -e "${CYAN}连接: ${SERVER_IP}:${HY2_PORT}${NC}"
+            echo -e "${YELLOW}注意: 客户端需设置 insecure: true${NC}"
+        fi
+        echo -e "${CYAN}密码: ${HY2_PASSWORD}${NC}"
         echo ""
+        echo -e "${YELLOW}分享链接:${NC}"
+        echo "${HY2_LINK}"
+        echo ""
+        if [ -f /root/hy2_qr.txt ]; then
+            echo -e "${GREEN}  二维码:${NC}"
+            cat /root/hy2_qr.txt 2>/dev/null || true
+            echo ""
+        fi
     fi
 
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  VLESS WS TLS 配置${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if [ "$USE_ACME" = true ]; then
-        echo -e "${CYAN}连接: ${CERT_DOMAIN}:${VLESS_WS_PORT}${NC}"
-    else
-        echo -e "${CYAN}连接: ${SERVER_IP}:${VLESS_WS_PORT}${NC}"
-        echo -e "${YELLOW}注意: 客户端需允许不安全连接${NC}"
-    fi
-    echo -e "${CYAN}UUID: ${VLESS_WS_UUID}${NC}"
-    echo -e "${CYAN}路径: ${VLESS_WS_PATH}${NC}"
-    echo ""
-    echo -e "${YELLOW}分享链接:${NC}"
-    echo "${VLESS_WS_LINK}"
-    echo ""
-
-    if [ -f /root/vless_ws_qr.txt ]; then
+    if [ "$INSTALL_REALITY" = true ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  二维码${NC}"
+        echo -e "${GREEN}  VLESS Reality 配置${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        cat /root/vless_ws_qr.txt 2>/dev/null || true
+        echo -e "${CYAN}连接: ${CONNECT_ADDR}:${REALITY_PORT}${NC}"
+        echo -e "${CYAN}UUID: ${REALITY_UUID}${NC}"
+        echo -e "${CYAN}SNI:  ${SNI}${NC}"
         echo ""
+        echo -e "${YELLOW}分享链接:${NC}"
+        echo "${VLESS_LINK}"
+        echo ""
+        if [ -f /root/vless_qr.txt ]; then
+            echo -e "${GREEN}  二维码:${NC}"
+            cat /root/vless_qr.txt 2>/dev/null || true
+            echo ""
+        fi
     fi
 
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}  Shadowsocks 2022 配置${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if [ "$USE_ACME" = true ]; then
-        echo -e "${CYAN}连接: ${CERT_DOMAIN}:${SS2022_PORT}${NC}"
-    else
-        echo -e "${CYAN}连接: ${SERVER_IP}:${SS2022_PORT}${NC}"
-    fi
-    echo -e "${CYAN}加密: ${SS2022_METHOD}${NC}"
-    echo -e "${CYAN}密码: ${SS2022_PASSWORD}${NC}"
-    echo ""
-    echo -e "${YELLOW}分享链接:${NC}"
-    echo "${SS2022_LINK}"
-    echo ""
-
-    if [ -f /root/ss2022_qr.txt ]; then
+    if [ "$INSTALL_VLESS_WS" = true ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${GREEN}  二维码${NC}"
+        echo -e "${GREEN}  VLESS WS TLS 配置${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        cat /root/ss2022_qr.txt 2>/dev/null || true
+        if [ "$USE_ACME" = true ]; then
+            echo -e "${CYAN}连接: ${CERT_DOMAIN}:${VLESS_WS_PORT}${NC}"
+        else
+            echo -e "${CYAN}连接: ${SERVER_IP}:${VLESS_WS_PORT}${NC}"
+            echo -e "${YELLOW}注意: 客户端需允许不安全连接${NC}"
+        fi
+        echo -e "${CYAN}UUID: ${VLESS_WS_UUID}${NC}"
+        echo -e "${CYAN}路径: ${VLESS_WS_PATH}${NC}"
         echo ""
+        echo -e "${YELLOW}分享链接:${NC}"
+        echo "${VLESS_WS_LINK}"
+        echo ""
+        if [ -f /root/vless_ws_qr.txt ]; then
+            echo -e "${GREEN}  二维码:${NC}"
+            cat /root/vless_ws_qr.txt 2>/dev/null || true
+            echo ""
+        fi
     fi
 
-    # 中转服务器模式提示
+    if [ "$INSTALL_SS2022" = true ]; then
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${GREEN}  Shadowsocks 2022 配置${NC}"
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "${CYAN}连接: ${CONNECT_ADDR}:${SS2022_PORT}${NC}"
+        echo -e "${CYAN}加密: ${SS2022_METHOD}${NC}"
+        echo -e "${CYAN}密码: ${SS2022_PASSWORD}${NC}"
+        echo ""
+        echo -e "${YELLOW}分享链接:${NC}"
+        echo "${SS2022_LINK}"
+        echo ""
+        if [ -f /root/ss2022_qr.txt ]; then
+            echo -e "${GREEN}  二维码:${NC}"
+            cat /root/ss2022_qr.txt 2>/dev/null || true
+            echo ""
+        fi
+    fi
+
     if [ "$SERVER_TYPE" = "relay" ]; then
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${YELLOW}⚠️  中转服务器模式${NC}"
@@ -2011,10 +2114,10 @@ EOF
         echo ""
         echo -e "${CYAN}落地服务器: ${RELAY_BACKEND_ADDR}${NC}"
         case "$RELAY_BACKEND_TYPE" in
-            hy2) echo -e "${CYAN}协议: Hysteria 2${NC}" ;;
-            vless) echo -e "${CYAN}协议: VLESS Reality${NC}" ;;
+            hy2)      echo -e "${CYAN}协议: Hysteria 2${NC}" ;;
+            vless)    echo -e "${CYAN}协议: VLESS Reality${NC}" ;;
             vless-ws) echo -e "${CYAN}协议: VLESS WS TLS${NC}" ;;
-            ss2022) echo -e "${CYAN}协议: Shadowsocks 2022${NC}" ;;
+            ss2022)   echo -e "${CYAN}协议: Shadowsocks 2022${NC}" ;;
         esac
         echo ""
         echo -e "${YELLOW}提示: 客户端连接到本服务器(${CONNECT_ADDR})，流量将自动转发到落地服务器${NC}"
@@ -2022,11 +2125,11 @@ EOF
     fi
 
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}💡 重要信息${NC}"
+    echo -e "${YELLOW}重要信息${NC}"
     echo ""
-    echo "  📁 配置已保存到: /root/sing-box-info.txt"
+    echo "  配置已保存到: /root/sing-box-info.txt"
     echo ""
-    echo "  🔧 服务管理:"
+    echo "  服务管理:"
     echo "     systemctl status sing-box"
     echo "     systemctl restart sing-box"
     echo ""
