@@ -5,7 +5,7 @@
 # 协议: Hysteria 2 + VLESS Reality Vision + VLESS WS TLS + Shadowsocks 2022
 # 功能: 安装、卸载、灵活证书配置、中转服务器支持
 # 作者: Chaconne
-# 版本: 7.0
+# 版本: 7.1
 #####################################################################
 
 trap 'rm -f /root/hy2*txt /root/vless*txt /root/vless_ws*txt /root/ss2022*txt /root/hy2*png /root/vless*png /root/vless_ws*png /root/ss2022*png /root/share*' EXIT
@@ -331,6 +331,118 @@ fix_auto_renewal() {
 }
 
 #####################################################################
+# 时钟同步功能
+#####################################################################
+
+do_time_sync() {
+    print_info "正在同步时间..."
+    timedatectl set-ntp false 2>/dev/null || true
+    if ! command -v htpdate &>/dev/null; then
+        print_info "安装 htpdate..."
+        apt-get install -y htpdate 2>/dev/null || yum install -y htpdate 2>/dev/null || true
+    fi
+    if command -v htpdate &>/dev/null; then
+        htpdate -s www.google.com 2>/dev/null \
+            || htpdate -s www.cloudflare.com 2>/dev/null \
+            || htpdate -s www.baidu.com 2>/dev/null \
+            || true
+        print_success "时间同步完成: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    else
+        print_error "htpdate 安装失败，请手动安装"
+    fi
+}
+
+setup_time_sync_cron() {
+    if ! command -v htpdate &>/dev/null; then
+        apt-get install -y htpdate 2>/dev/null || yum install -y htpdate 2>/dev/null || true
+    fi
+    if command -v htpdate &>/dev/null; then
+        cat > /etc/cron.d/htpdate << 'CRONEOF'
+# 每15分钟同步一次时间 (解决 SS2022 bad timestamp 问题)
+*/15 * * * * root /usr/sbin/htpdate -s www.google.com
+@reboot root /usr/sbin/htpdate -s www.google.com
+CRONEOF
+        print_success "已配置每15分钟自动同步 + 开机自动同步"
+    else
+        print_error "htpdate 未安装，无法配置自动同步"
+    fi
+}
+
+show_time_sync_menu() {
+    clear
+    echo -e "${CYAN}"
+    cat << "EOF"
+╔═══════════════════════════════════════════════════╗
+║                                                   ║
+║       时钟同步                                    ║
+║                                                   ║
+║   解决 Shadowsocks 2022 bad timestamp 问题        ║
+║   通过 HTTP 同步，无需 NTP UDP 端口               ║
+║                                                   ║
+╚═══════════════════════════════════════════════════╝
+EOF
+    echo -e "${NC}"
+
+    echo -e "${CYAN}当前系统时间:${NC} $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    if [ -f /etc/cron.d/htpdate ]; then
+        echo -e "${GREEN}[✓] 已配置 htpdate 自动同步${NC}"
+    else
+        echo -e "${YELLOW}[!] 尚未配置自动同步${NC}"
+    fi
+    echo ""
+    echo "  1) 立即同步 + 设置自动同步 (推荐)"
+    echo "  2) 仅立即同步"
+    echo "  3) 仅设置自动同步 (每15分钟 + 开机)"
+    echo "  4) 查看同步状态"
+    echo "  5) 返回主菜单"
+    echo ""
+
+    read -p "请选择 [1-5]: " time_choice
+
+    case $time_choice in
+        1)
+            echo ""
+            do_time_sync
+            setup_time_sync_cron
+            ;;
+        2)
+            echo ""
+            do_time_sync
+            ;;
+        3)
+            echo ""
+            setup_time_sync_cron
+            ;;
+        4)
+            echo ""
+            timedatectl status 2>/dev/null || date
+            echo ""
+            if [ -f /etc/cron.d/htpdate ]; then
+                echo -e "${GREEN}自动同步配置:${NC}"
+                cat /etc/cron.d/htpdate
+            else
+                echo -e "${YELLOW}未配置自动同步${NC}"
+            fi
+            ;;
+        5)
+            show_main_menu
+            return
+            ;;
+        *)
+            print_error "无效选项"
+            sleep 2
+            show_time_sync_menu
+            return
+            ;;
+    esac
+
+    echo ""
+    echo -e "${YELLOW}按任意键返回时钟同步菜单...${NC}"
+    read -n 1
+    show_time_sync_menu
+}
+
+#####################################################################
 # 主菜单
 #####################################################################
 
@@ -340,7 +452,7 @@ show_main_menu() {
     cat << "EOF"
 ╔═══════════════════════════════════════════════════╗
 ║                                                   ║
-║       Sing-box 管理脚本 v7.0                      ║
+║       Sing-box 管理脚本 v7.1                      ║
 ║                                                   ║
 ║   Hy2 + Reality + WS TLS + Shadowsocks 2022       ║
 ║   支持中转服务器模式 + VPS调优                    ║
@@ -356,10 +468,11 @@ EOF
     echo "  3) 查看配置信息"
     echo "  4) 证书管理 (查看/续期/自动续期)"
     echo "  5) VPS 系统调优 (BBR + TCP优化)"
-    echo "  6) 退出"
+    echo "  6) 时钟同步 (解决 SS2022 bad timestamp)"
+    echo "  7) 退出"
     echo ""
 
-    read -p "请输入选项 [1-6]: " menu_choice
+    read -p "请输入选项 [1-7]: " menu_choice
 
     case $menu_choice in
         1)
@@ -378,6 +491,9 @@ EOF
             show_optimize_menu
             ;;
         6)
+            show_time_sync_menu
+            ;;
+        7)
             echo -e "${GREEN}再见！${NC}"
             exit 0
             ;;
